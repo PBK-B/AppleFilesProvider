@@ -17,6 +17,7 @@ import Foundation
 open class HTTPFileProvider: NSObject, FileProviderBasicRemote, FileProviderOperations, FileProviderReadWrite, FileProviderReadWriteProgressive {
     open class var type: String { fatalError("HTTPFileProvider is an abstract class. Please implement \(#function) in subclass.") }
     public let baseURL: URL?
+    public let headerFields: [String : String]?
     open var dispatch_queue: DispatchQueue
     open var operation_queue: OperationQueue {
         willSet {
@@ -84,7 +85,7 @@ open class HTTPFileProvider: NSObject, FileProviderBasicRemote, FileProviderOper
      - credential: An `URLCredential` object with `user` and `password`.
      - cache: A URLCache to cache downloaded files and contents.
      */
-    public init(baseURL: URL?, credential: URLCredential?, cache: URLCache?) {
+    public init(baseURL: URL?, credential: URLCredential?, cache: URLCache?, headerFields: [String : String]? = [:]) {
         // Make base url absolute and path as directory
         let urlStr = baseURL?.absoluteString
         self.baseURL = urlStr.flatMap { $0.hasSuffix("/") ? URL(string: $0) : URL(string: $0 + "/") }
@@ -92,6 +93,7 @@ open class HTTPFileProvider: NSObject, FileProviderBasicRemote, FileProviderOper
         self.validatingCache = true
         self.cache = cache
         self.credential = credential
+        self.headerFields = headerFields
         
         let queueLabel = "FileProvider.\(Swift.type(of: self).type)"
         dispatch_queue = DispatchQueue(label: queueLabel, attributes: .concurrent)
@@ -192,6 +194,22 @@ open class HTTPFileProvider: NSObject, FileProviderBasicRemote, FileProviderOper
         } else {
             return relativePath.replacingOccurrences(of: "/", with: "", options: .anchored)
         }
+    }
+
+    // create URLRequest instance
+    open func urlRequest(of url: URL) -> URLRequest {
+        var request = URLRequest(url: url)
+        if let headerFields, headerFields.count > 0 {
+            for item in headerFields {
+                request.addValue(item.value, forHTTPHeaderField: item.key)
+            }
+        }
+        return request
+    }
+    
+    // create URLRequest instance fo path
+    open func urlRequest(of path: String) -> URLRequest {
+        return urlRequest(of: url(of: path))
     }
     
     open weak var fileOperationDelegate: FileOperationDelegate?

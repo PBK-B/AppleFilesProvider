@@ -15,7 +15,7 @@ import CoreGraphics
  Allows accessing to WebDAV server files. This provider doesn't cache or save files internally, however you can
  set `useCache` and `cache` properties to use Foundation `NSURLCache` system.
  
- WebDAV system supported by many cloud services including [Box.com](https://www.box.com/home) 
+ WebDAV system supported by many cloud services including [Box.com](https://www.box.com/home)
  and [Yandex disk](https://disk.yandex.com) and [ownCloud](https://owncloud.org).
  
  - Important: Because this class uses `URLSession`, it's necessary to disable App Transport Security
@@ -37,12 +37,12 @@ open class WebDAVFileProvider: HTTPFileProvider, FileProviderSharing {
        - credential: An `URLCredential` object with `user` and `password`.
        - cache: A URLCache to cache downloaded files and contents.
     */
-    public init? (baseURL: URL, credential: URLCredential?, cache: URLCache? = nil) {
+    public init? (baseURL: URL, credential: URLCredential?, cache: URLCache? = nil, headerFields: [String : String]? = nil) {
         if  !["http", "https"].contains(baseURL.uw_scheme.lowercased()) {
             return nil
         }
         let refinedBaseURL = (baseURL.absoluteString.hasSuffix("/") ? baseURL : baseURL.appendingPathComponent(""))
-        super.init(baseURL: refinedBaseURL.absoluteURL, credential: credential, cache: cache)
+        super.init(baseURL: refinedBaseURL.absoluteURL, credential: credential, cache: cache, headerFields: headerFields)
     }
     
     public required convenience init?(coder aDecoder: NSCoder) {
@@ -54,7 +54,9 @@ open class WebDAVFileProvider: HTTPFileProvider, FileProviderSharing {
             return nil
         }
         self.init(baseURL: baseURL,
-                  credential: aDecoder.decodeObject(of: URLCredential.self, forKey: "credential"))
+                  credential: aDecoder.decodeObject(of: URLCredential.self, forKey: "credential"),
+                  headerFields: aDecoder.decodeObject(forKey: "headerFields") as? [String : String]
+        )
         self.useCache        = aDecoder.decodeBool(forKey: "useCache")
         self.validatingCache = aDecoder.decodeBool(forKey: "validatingCache")
     }
@@ -117,7 +119,7 @@ open class WebDAVFileProvider: HTTPFileProvider, FileProviderSharing {
      */
     open func attributesOfItem(path: String, including: [URLResourceKey], completionHandler: @escaping (_ attributes: FileObject?, _ error: Error?) -> Void) {
         let url = self.url(of: path)
-        var request = URLRequest(url: url)
+        var request = self.urlRequest(of: url)
         request.httpMethod = "PROPFIND"
         request.setValue("0", forHTTPHeaderField: "Depth")
         request.setValue(authentication: credential, with: credentialType)
@@ -148,7 +150,7 @@ open class WebDAVFileProvider: HTTPFileProvider, FileProviderSharing {
         guard let baseURL = baseURL else {
             return
         }
-        var request = URLRequest(url: baseURL)
+        var request = self.urlRequest(of: baseURL)
         request.httpMethod = "PROPFIND"
         request.setValue("0", forHTTPHeaderField: "Depth")
         request.setValue(authentication: credential, with: credentialType)
@@ -227,10 +229,11 @@ open class WebDAVFileProvider: HTTPFileProvider, FileProviderSharing {
     @discardableResult
     open func searchFiles(path: String, recursive: Bool, query: NSPredicate, including: [URLResourceKey], foundItemHandler: ((FileObject) -> Void)?, completionHandler: @escaping (_ files: [FileObject], _ error: Error?) -> Void) -> Progress? {
         let url = self.url(of: path)
-        var request = URLRequest(url: url)
+        var request = self.urlRequest(of: url)
         request.httpMethod = "PROPFIND"
         // Depth infinity is disabled on some servers. Implement workaround?!
         request.setValue(recursive ? "infinity" : "1", forHTTPHeaderField: "Depth")
+        // request.setValue("HC-Auth-Token=da28b1e6-19cd-4d11-9b3e-93de7cf03746", forHTTPHeaderField: "Cookie")
         request.setValue(authentication: credential, with: credentialType)
         request.setValue(contentType: .xml, charset: .utf8)
         request.httpBody = WebDavFileObject.xmlProp(including)
@@ -242,6 +245,7 @@ open class WebDAVFileProvider: HTTPFileProvider, FileProviderSharing {
             // FIXME: paginating results
             var responseError: FileProviderHTTPError?
             if let code = (response as? HTTPURLResponse)?.statusCode , code >= 300, let rCode = FileProviderHTTPErrorCode(rawValue: code) {
+                // print("[response] responseError \(request)")
                 responseError = self.serverError(with: rCode, path: path, data: data)
             }
             guard let data = data else {
@@ -272,7 +276,7 @@ open class WebDAVFileProvider: HTTPFileProvider, FileProviderSharing {
     }
     
     override open func isReachable(completionHandler: @escaping (_ success: Bool, _ error: Error?) -> Void) {
-        var request = URLRequest(url: baseURL!)
+        var request = self.urlRequest(of: baseURL!)
         request.httpMethod = "PROPFIND"
         request.setValue("0", forHTTPHeaderField: "Depth")
         request.setValue(authentication: credential, with: credentialType)
@@ -299,7 +303,7 @@ open class WebDAVFileProvider: HTTPFileProvider, FileProviderSharing {
         }
         
         let url = self.url(of: path)
-        var request = URLRequest(url: url)
+        var request = self.urlRequest(of: url)
         request.httpMethod = "PROPPATCH"
         request.setValue(authentication: credential, with: credentialType)
         request.setValue(contentType: .xml, charset: .utf8)
@@ -362,7 +366,7 @@ open class WebDAVFileProvider: HTTPFileProvider, FileProviderSharing {
             fatalError("Unimplemented operation \(operation.description) in \(#file)")
         }
         
-        var request = URLRequest(url: url)
+        var request = self.urlRequest(of: url)
         request.httpMethod = method
         request.setValue(authentication: credential, with: credentialType)
         request.setValue(overwrite ? "T" : "F", forHTTPHeaderField: "Overwrite")
@@ -423,7 +427,7 @@ extension WebDAVFileProvider: ExtendedFileProvider {
         
         let dimension = dimension ?? CGSize(width: 64, height: 64)
         let url = URL(string: self.url(of: path).absoluteString + "?preview&size=\(dimension.width)x\(dimension.height)")!
-        var request = URLRequest(url: url)
+        var request = self.urlRequest(of: url)
         request.httpMethod = "GET"
         request.setValue(authentication: credential, with: credentialType)
         let task = session.dataTask(with: request, completionHandler: { (data, response, error) in
